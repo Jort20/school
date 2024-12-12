@@ -1,7 +1,5 @@
-# test.py
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
 
 class TumorGrowthModels:
     def __init__(self, t_data, V_data):
@@ -15,18 +13,6 @@ class TumorGrowthModels:
         V_data = [250, 255, 550, 575, 576, 800, 1050, 1250, 1750, 2000, 2550, 2750, 3000, 3500, 4000]
         return np.array(t_data), np.array(V_data)
 
-    # Groeimodellen
-    @staticmethod
-    def logistic_growth(t, V, c, V_max):
-        return c * V * (1 - V / V_max)
-
-    @staticmethod
-    def gompertz_growth(t, V, c, V_max):
-        return c * V * np.log(V_max / V)
-
-    @staticmethod
-    def von_bertalanffy_growth(t, V, c, d):
-        return c * V**(2/3) - d * V
 
     # Runga methode voor numerieke integratie
     @staticmethod
@@ -42,54 +28,62 @@ class TumorGrowthModels:
             V_new = V_current + (y1 + 2 * y2 + 2 * y3 + y4) / 6
             V.append(V_new)
         return np.array(V)
-
-    def gompertz_Runga(self, t, V0, c, V_max, dt):
-        return self.Runga_method(self.gompertz_growth, t, V0, c, V_max, dt)
-
-    def logistic_Runga(self, t, V0, c, V_max, dt):
-        return self.Runga_method(self.logistic_growth, t, V0, c, V_max, dt)
-
-    def von_bertalanffy_runga(self, t, V0, c, d, dt):
-        return self.Runga_method(self.von_bertalanffy_growth, t, V0, c, d, dt)
-
-    # Wrapper functies voor curve fitting
-    @staticmethod
-    def gompertz_wrapper(t, c, V_max):
-        V0 = 250  
-        dt = t[1] - t[0]
-        V = [V0]
+    
+    def montroll_Runga(self, t, V0, c, V_max, d, dt):
+        V = [V0]  # Beginwaarde van het volume
         for i in range(1, len(t)):
-            V_new = V[-1] + dt * TumorGrowthModels.gompertz_growth(t[i], V[-1], c, V_max)
-            V.append(V_new)
-        return np.array(V)
+            t_current = t[i - 1]
+            V_current = V[-1]
 
-    @staticmethod
-    def logistic_wrapper(t, c, V_max):
-        V0 = 250  
-        dt = t[1] - t[0]
-        V = [V0]
+            # Bereken de groeisnelheid voor Montroll's model
+            y1 = dt * c * V_current * (V_max**d - V_current**d)
+            y2 = dt * c * (V_current + y1 / 2) * (V_max**d - (V_current + y1 / 2)**d)
+            y3 = dt * c * (V_current + y2 / 2) * (V_max**d - (V_current + y2 / 2)**d)
+            y4 = dt * c * (V_current + y3) * (V_max**d - (V_current + y3)**d)
+
+            # Bereken de nieuwe waarde van V
+            V_new = V_current + (y1 + 2 * y2 + 2 * y3 + y4) / 6
+            V.append(V_new)
+
+        return np.array(V)
+    
+    def allee_Runga(self, t, V0, c, V_min, V_max, dt):
+        V = [V0]  # Beginwaarde van het volume
         for i in range(1, len(t)):
-            V_new = V[-1] + dt * TumorGrowthModels.logistic_growth(t[i], V[-1], c, V_max)
+            t_current = t[i - 1]
+            V_current = V[-1]
+
+            # Bereken de groeisnelheid voor het Allee-effect model (direct in de Runga methode)
+            y1 = dt * c * (V_current - V_min) * (V_max - V_current)
+            y2 = dt * c * (V_current + y1 / 2 - V_min) * (V_max - (V_current + y1 / 2))
+            y3 = dt * c * (V_current + y2 / 2 - V_min) * (V_max - (V_current + y2 / 2))
+            y4 = dt * c * (V_current + y3 - V_min) * (V_max - (V_current + y3))
+
+            # Bereken de nieuwe waarde van V
+            V_new = V_current + (y1 + 2 * y2 + 2 * y3 + y4) / 6
             V.append(V_new)
+
         return np.array(V)
-
+    
     @staticmethod
-    def von_bertalanffy_wrapper(t, c, d):
-        V0 = 250  
-        dt = t[1] - t[0]
-        V = [V0]
-        for i in range(1, len(t)):
-            V_new = V[-1] + dt * TumorGrowthModels.von_bertalanffy_growth(t[i], V[-1], c, d)
-            V.append(V_new)
-        return np.array(V)
+    def fit_model_brute_force(model_wrapper, t_data, V_data, p0, num_iterations=10000, step_size=0.01):
+        def model(t, *params):
+            return model_wrapper(t, *params, V_data)
 
-    # Model fitting met curve_fit
-    @staticmethod
-    def fit_model(model_wrapper, t_data, V_data, p0):
-        popt, _ = curve_fit(model_wrapper, t_data, V_data, p0=p0)
-        return popt
+        best_params = p0
+        best_cost = np.sum((model(t_data, *best_params) - V_data) ** 2)
 
-    # AIC en BIC berekeningen
+        for _ in range(num_iterations):
+            new_params = best_params + np.random.uniform(-step_size, step_size, len(p0))
+            cost = np.sum((model(t_data, *new_params) - V_data) ** 2)
+
+            # Gradients can be used here for more informed steps, rather than random perturbation
+            if cost < best_cost:
+                best_params = new_params
+                best_cost = cost
+
+        return best_params
+    
     @staticmethod
     def calculate_aic(n, rss, k):
         return n * np.log(rss / n) + 2 * k
@@ -102,59 +96,130 @@ class TumorGrowthModels:
     def calculate_residuals(V_data, V_sim):
         residuals = V_data - V_sim
         rss = np.sum(residuals**2)
-        return rss
+        return rss        
+    
+class TumorGrowthModels:
+    # Runga-Kutta method for solving differential equations
+    @staticmethod
+    def Runga_method(growth_function, t, V0, *params):
+        V = [V0]
+        dt = t[1] - t[0]
+        for i in range(1, len(t)):
+            k1 = growth_function(t[i-1], V[-1], *params)
+            k2 = growth_function(t[i-1] + dt/2, V[-1] + dt*k1/2, *params)
+            k3 = growth_function(t[i-1] + dt/2, V[-1] + dt*k2/2, *params)
+            k4 = growth_function(t[i-1] + dt, V[-1] + dt*k3, *params)
+            V_new = V[-1] + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
+            V.append(V_new)
+        return np.array(V)
 
-    # Model evaluatie, selectie en visualisatie
-    def evaluate_models(self, t_vooruit=None):
-        # Als t_vooruit niet wordt meegegeven, gebruik de standaardwaarde
-        if t_vooruit is None:
-            t_vooruit = np.linspace(0, 120, 100)  # Standaardtijdspanne van 0 tot 120 dagen met 100 punten
+class LogisticModel(TumorGrowthModels):
+    @staticmethod
+    def logistic_growth(t, V, c, V_max):
+        return c * V * (V_max - V)
 
-        initial_params = [0.1, 4000]
-        initial_params_von_bertalanffy = [0.1, 0.01]
+    def logistic_Runga(self, t, V0, c, V_max, dt):
+        return TumorGrowthModels.Runga_method(self.logistic_growth, t, V0, c, V_max)
 
-        # Pas modellen aan
-        params_gompertz = self.fit_model(self.gompertz_wrapper, self.t_data, self.V_data, p0=initial_params)
-        params_logistic = self.fit_model(self.logistic_wrapper, self.t_data, self.V_data, p0=initial_params)
-        params_von_bertalanffy = self.fit_model(self.von_bertalanffy_wrapper, self.t_data, self.V_data, p0=initial_params_von_bertalanffy)
+    @staticmethod
+    def logistic_wrapper(t, c, V_max, V_data):
+        V0 = V_data[0]
+        dt = t[1] - t[0]
+        V = [V0]
+        for i in range(1, len(t)):
+            V_new = V[-1] + dt * LogisticModel.logistic_growth(t[i], V[-1], c, V_max)
+            V.append(V_new)
+        return np.array(V)
 
-        # Simuleer data
-        dt = t_vooruit[1] - t_vooruit[0]
-        V_sim_gompertz = self.gompertz_Runga(t_vooruit, 250, *params_gompertz, dt)
-        V_sim_logistic = self.logistic_Runga(t_vooruit, 250, *params_logistic, dt)
-        V_sim_von_bertalanffy = self.von_bertalanffy_runga(t_vooruit, 250, *params_von_bertalanffy, dt)
+class GompertzModel(TumorGrowthModels):
+    @staticmethod
+    def gompertz_growth(t, V, c, V_max):
+        return c * V * np.log(V_max / V)
 
-        # Visualisatie
-        plt.figure(figsize=(10, 6))
-        plt.scatter(self.t_data, self.V_data, color="red", label="Data")
-        plt.plot(t_vooruit, V_sim_gompertz, label=f"Gompertz Model", color="blue")
-        plt.plot(t_vooruit, V_sim_logistic, label=f"Logistic Model", color="green")
-        plt.plot(t_vooruit, V_sim_von_bertalanffy, label=f"Von Bertalanffy Model", color="purple")
-        plt.title("Tumorgroei Modellen vs. Data")
-        plt.xlabel("Tijd (dagen)")
-        plt.ylabel("Tumorvolume (mm³)")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
+    def gompertz_Runga(self, t, V0, c, V_max, dt):
+        return TumorGrowthModels.Runga_method(self.gompertz_growth, t, V0, c, V_max)
 
-        # Bereken AIC en BIC
-        rss_gompertz = self.calculate_residuals(self.V_data, self.gompertz_wrapper(self.t_data, *params_gompertz))
-        rss_logistic = self.calculate_residuals(self.V_data, self.logistic_wrapper(self.t_data, *params_logistic))
-        rss_von_bertalanffy = self.calculate_residuals(self.V_data, self.von_bertalanffy_wrapper(self.t_data, *params_von_bertalanffy))
+    @staticmethod
+    def gompertz_wrapper(t, c, V_max, V_data):
+        V0 = V_data[0]
+        dt = t[1] - t[0]
+        V = [V0]
+        for i in range(1, len(t)):
+            V_new = V[-1] + dt * GompertzModel.gompertz_growth(t[i], V[-1], c, V_max)
+            V.append(V_new)
+        return np.array(V)
 
-        n = len(self.V_data)
-        k_gompertz = len(params_gompertz)
-        k_logistic = len(params_logistic)
-        k_von_bertalanffy = len(params_von_bertalanffy)
+class VonBertalanffyModel(TumorGrowthModels):
+    @staticmethod
+    def von_bertalanffy_growth(t, V, c, d):
+        return c * V**(2/3) - d * V
 
-        aic_gompertz = self.calculate_aic(n, rss_gompertz, k_gompertz)
-        bic_gompertz = self.calculate_bic(n, rss_gompertz, k_gompertz)
-        aic_logistic = self.calculate_aic(n, rss_logistic, k_logistic)
-        bic_logistic = self.calculate_bic(n, rss_logistic, k_logistic)
-        aic_von_bertalanffy = self.calculate_aic(n, rss_von_bertalanffy, k_von_bertalanffy)
-        bic_von_bertalanffy = self.calculate_bic(n, rss_von_bertalanffy, k_von_bertalanffy)
+    def von_bertalanffy_runga(self, t, V0, c, d, dt):
+        return TumorGrowthModels.Runga_method(self.von_bertalanffy_growth, t, V0, c, d)
 
-        print("AIC en BIC resultaten:")
-        print(f"Gompertz: AIC = {aic_gompertz:.2f}, BIC = {bic_gompertz:.2f}")
-        print(f"Logistic: AIC = {aic_logistic:.2f}, BIC = {bic_logistic:.2f}")
-        print(f"Von Bertalanffy: AIC = {aic_von_bertalanffy:.2f}, BIC = {bic_von_bertalanffy:.2f}")
+    @staticmethod
+    def von_bertalanffy_wrapper(t, c, d, V_data):
+        V0 = V_data[0]
+        dt = t[1] - t[0]
+        V = [V0]
+        for i in range(1, len(t)):
+            V_new = V[-1] + dt * VonBertalanffyModel.von_bertalanffy_growth(t[i], V[-1], c, d)
+            V.append(V_new)
+        return np.array(V)
+
+class MendelsohnModel(TumorGrowthModels):
+    @staticmethod
+    def mendelsohn_growth(t, V, c, D):
+        return c * V**D
+
+    def mendelsohn_Runga(self, t, V0, c, D, dt):
+        return TumorGrowthModels.Runga_method(self.mendelsohn_growth, t, V0, c, D)
+
+    @staticmethod
+    def mendelsohn_wrapper(t, c, D, V_data):
+        V0 = V_data[0]
+        dt = t[1] - t[0]
+        V = [V0]
+        for i in range(1, len(t)):
+            V_new = V[-1] + dt * MendelsohnModel.mendelsohn_growth(t[i], V[-1], c, D)
+            V.append(V_new)
+        return np.array(V)
+
+class MontrollModel(TumorGrowthModels):
+    @staticmethod
+    def montroll_growth(t, V, c, V_max, d):
+        return c * V * (V_max**d - V**d)
+
+    def montroll_Runge(self, t, V0, c, V_max, d, dt):
+        return TumorGrowthModels.Runga_method(self.montroll_growth, t, V0, c, V_max, d)
+
+    @staticmethod
+    def montroll_wrapper(t, c, V_max, d, V_data):
+        V0 = V_data[0]
+        dt = t[1] - t[0]
+        V = [V0]
+        for i in range(1, len(t)):
+            V_new = V[-1] + dt * MontrollModel.montroll_growth(t[i], V[-1], c, V_max, d)
+            V.append(V_new)
+        return np.array(V)
+
+class AlleeEffectModel(TumorGrowthModels):
+    @staticmethod
+    def allee_growth(t, V, c, V_min, V_max):
+        if V <= V_min or V >= V_max:
+            return 0
+        return c * (V - V_min) * (V_max - V)
+
+    def runga_allee(self, t, V0, c, V_min, V_max, dt):
+        return TumorGrowthModels.Runga_method(self.allee_growth, t, V0, c, V_min, V_max)
+
+    @staticmethod
+    def allee_wrapper(t, c, V_min, V_max, V_data):
+        V0 = V_data[0]
+        dt = t[1] - t[0]
+        V = [V0]
+        for i in range(1, len(t)):
+            V_new = V[-1] + dt * AlleeEffectModel.allee_growth(t[i], V[-1], c, V_min, V_max)
+            V.append(V_new)
+        return np.array(V)
+    
